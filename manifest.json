@@ -1,0 +1,18 @@
+{
+  "name": "Reflex Grid",
+  "short_name": "Reflex Grid",
+  "description": "Tap tiles before they expire. Build combos, level up, survive.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#08080f",
+  "theme_color": "#08080f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Reflex Grid</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#08080f">
+
+<!-- iOS PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Reflex Grid">
+<link rel="apple-touch-icon" href="icon.svg">
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: #08080f;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100svh;
+  /* respect iPhone notch / home indicator */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#app {
+  width: min(400px, 100vw);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ─── HUD ─── */
+.hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.hb { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.lbl { font-size: 9px; letter-spacing: 3px; color: #2e2e44; text-transform: uppercase; }
+.val { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+#sc  { color: #a066ee; }
+#cm  { font-size: 22px; font-weight: 800; color: #555; transition: color 0.15s; }
+
+.dots { display: flex; gap: 6px; align-items: center; }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #a066ee;
+  box-shadow: 0 0 7px #a066ee99;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.dot.dead { background: #18182a; box-shadow: none; }
+
+/* ─── Level bar ─── */
+.lrow { display: flex; align-items: center; gap: 8px; }
+.llbl { font-size: 9px; letter-spacing: 3px; color: #2e2e44; width: 40px; text-transform: uppercase; }
+.ltrack { flex: 1; height: 2px; background: #14142a; border-radius: 2px; overflow: hidden; }
+.lfill {
+  height: 100%;
+  background: linear-gradient(90deg, #6633bb, #a066ee);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.12s;
+}
+.lnum { font-size: 11px; color: #a066ee; font-weight: 700; width: 18px; text-align: right; }
+
+/* ─── Grid ─── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.tile {
+  aspect-ratio: 1;
+  border-radius: 14px;
+  background: #0c0c1a;
+  border: 1px solid #16162a;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  transition: transform 0.07s;
+}
+.tile:active { transform: scale(0.86); }
+
+.tf {
+  position: absolute;
+  inset: 0;
+  border-radius: 13px;
+  opacity: 0;
+  transition: opacity 0.14s;
+}
+.tile.on .tf { opacity: 1; }
+
+@keyframes hflash {
+  0%   { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+.tile.hit::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 13px;
+  background: #fff;
+  pointer-events: none;
+  animation: hflash 0.22s ease-out forwards;
+}
+
+@keyframes mflash {
+  0%   { background: #2a0808; border-color: #440000; }
+  100% { background: #0c0c1a; border-color: #16162a; }
+}
+.tile.miss { animation: mflash 0.38s ease-out forwards; }
+
+/* ─── Overlays ─── */
+.ov {
+  position: fixed; inset: 0;
+  background: rgba(8, 8, 15, 0.97);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px; z-index: 99;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.ot { font-size: 44px; font-weight: 900; letter-spacing: -1.5px; }
+.ot b { color: #a066ee; }
+
+.os {
+  font-size: 12px; color: #383850;
+  letter-spacing: 1px; text-align: center;
+  line-height: 2; text-transform: uppercase;
+}
+
+.sbk { display: flex; flex-direction: column; gap: 5px; align-items: center; margin: 4px 0; }
+.sr  { font-size: 12px; color: #383850; letter-spacing: 1px; text-transform: uppercase; }
+.sr span { color: #777; }
+
+.btn {
+  margin-top: 8px; padding: 13px 48px;
+  background: #a066ee; color: #08080f;
+  border: none; border-radius: 100px;
+  font-size: 14px; font-weight: 800;
+  cursor: pointer; letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: transform 0.1s, background 0.1s;
+}
+.btn:hover  { transform: scale(1.05); background: #b87fff; }
+.btn:active { transform: scale(0.96); }
+
+@keyframes pop {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-44px) scale(0.8); }
+}
+.pop {
+  position: fixed;
+  font-size: 17px; font-weight: 800;
+  pointer-events: none; z-index: 200;
+  animation: pop 0.65s ease-out forwards;
+  text-shadow: 0 1px 8px #0008;
+}
+
+@keyframes lvl {
+  0%   { opacity: 0.25; }
+  100% { opacity: 0; }
+}
+.lvlflash {
+  position: fixed; inset: 0;
+  background: #a066ee;
+  pointer-events: none; z-index: 198;
+  animation: lvl 0.55s ease-out forwards;
+}
+
+@keyframes cbang {
+  0%   { transform: scale(1.6); }
+  100% { transform: scale(1); }
+}
+.cbang { animation: cbang 0.18s ease-out; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="hud">
+    <div class="hb">
+      <div class="lbl">Score</div>
+      <div class="val" id="sc">0</div>
+    </div>
+    <div class="hb">
+      <div class="lbl">Combo</div>
+      <div class="val" id="cm">×1</div>
+    </div>
+    <div class="hb">
+      <div class="lbl">Lives</div>
+      <div class="dots" id="dots"></div>
+    </div>
+  </div>
+
+  <div class="lrow">
+    <div class="llbl">Level</div>
+    <div class="ltrack"><div class="lfill" id="lbar"></div></div>
+    <div class="lnum"  id="lv">1</div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<!-- Start screen -->
+<div class="ov" id="ss">
+  <div class="ot">REFLEX <b>GRID</b></div>
+  <div class="os">
+    Tap tiles before they expire<br>
+    Build combos · level up · survive
+  </div>
+  <button class="btn" id="sb">Play</button>
+</div>
+
+<!-- Game over screen -->
+<div class="ov" id="gs" style="display:none">
+  <div class="ot">GAME <b>OVER</b></div>
+  <div class="sbk">
+    <div class="sr">Score &nbsp;<span id="fs">0</span></div>
+    <div class="sr">Best &nbsp;<span id="bst">0</span></div>
+    <div class="sr">Max combo &nbsp;<span id="fc">×0</span></div>
+    <div class="sr">Level reached &nbsp;<span id="fll">1</span></div>
+  </div>
+  <button class="btn" id="rb">Try Again</button>
+</div>
+
+<script>
+'use strict';
+
+const N = 16, ML = 3;
+
+function prm(lv) {
+  return {
+    max:  Math.min(1 + Math.floor(lv * 0.65), 8),
+    life: Math.max(580, 2400 - lv * 145),
+    gap:  Math.max(260, 1200 - lv * 72),
+  };
+}
+
+let S, els, raf, lastSpawn;
+let hi = +(localStorage.getItem('rfx_hi') || 0);
+
+function mkState() {
+  return {
+    score: 0, combo: 0, maxCombo: 0, level: 1, hits: 0, lives: ML, on: false,
+    tiles: Array.from({length: N}, () => ({ active: false, t0: 0, life: 0 }))
+  };
+}
+
+function buildGrid() {
+  const g = document.getElementById('grid');
+  g.innerHTML = '';
+  els = [];
+  for (let i = 0; i < N; i++) {
+    const d = document.createElement('div');
+    d.className = 'tile';
+    d.innerHTML = '<div class="tf"></div>';
+    d.addEventListener('pointerdown', e => { e.preventDefault(); tap(i); });
+    g.appendChild(d);
+    els.push(d);
+  }
+}
+
+function makeDots() {
+  const c = document.getElementById('dots');
+  c.innerHTML = '';
+  for (let i = 0; i < ML; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot';
+    c.appendChild(d);
+  }
+}
+
+function activate(i) {
+  const p = prm(S.level);
+  S.tiles[i] = { active: true, t0: performance.now(), life: p.life };
+  els[i].classList.add('on');
+}
+
+function deactivate(i) {
+  S.tiles[i].active = false;
+  els[i].classList.remove('on');
+  els[i].querySelector('.tf').style.cssText = '';
+}
+
+function tap(i) {
+  if (!S.on || !S.tiles[i].active) return;
+  deactivate(i);
+  S.combo++;
+  if (S.combo > S.maxCombo) S.maxCombo = S.combo;
+  S.hits++;
+  const pts = 100 * S.combo;
+  S.score += pts;
+  const nl = Math.floor(S.hits / 10) + 1;
+  if (nl > S.level) { S.level = nl; lvlFX(); }
+  hitFX(i, pts);
+  hud();
+}
+
+function expire(i) {
+  deactivate(i);
+  S.combo = 0;
+  S.lives = Math.max(0, S.lives - 1);
+  hud();
+  if (S.lives === 0) { end(); return; }
+  els[i].classList.add('miss');
+  setTimeout(() => els[i].classList.remove('miss'), 380);
+}
+
+function col(t) {
+  const h = 270 - t * 242;
+  const s = 62 + t * 28;
+  const l = 56 + t * 4;
+  return `hsl(${h|0},${s|0}%,${l|0}%)`;
+}
+
+function frame(now) {
+  if (!S.on) return;
+  const p = prm(S.level);
+  let active = 0;
+
+  for (let i = 0; i < N; i++) {
+    const tile = S.tiles[i];
+    if (!tile.active) continue;
+    active++;
+    const prog = (now - tile.t0) / tile.life;
+    if (prog >= 1) { expire(i); active--; continue; }
+    const c = col(Math.min(prog, 0.99));
+    const tf = els[i].querySelector('.tf');
+    tf.style.background = c;
+    tf.style.boxShadow = `inset 0 0 22px ${c}44, 0 0 8px ${c}33`;
+  }
+
+  if (active < p.max && now - lastSpawn > p.gap) {
+    const pool = [];
+    for (let i = 0; i < N; i++) if (!S.tiles[i].active) pool.push(i);
+    if (pool.length) {
+      activate(pool[Math.random() * pool.length | 0]);
+      lastSpawn = now;
+    }
+  }
+
+  raf = requestAnimationFrame(frame);
+}
+
+function hitFX(i, pts) {
+  const el = els[i];
+  el.classList.remove('hit');
+  void el.offsetWidth;
+  el.classList.add('hit');
+  setTimeout(() => el.classList.remove('hit'), 250);
+
+  const r = el.getBoundingClientRect();
+  const p = document.createElement('div');
+  p.className = 'pop';
+  p.textContent = `+${pts}`;
+  p.style.left = `${r.left + r.width / 2 - 18}px`;
+  p.style.top  = `${r.top - 2}px`;
+  p.style.color = S.combo >= 8 ? '#ff5555'
+                : S.combo >= 4 ? '#ff9922'
+                : '#a066ee';
+  document.body.appendChild(p);
+  setTimeout(() => p.remove(), 700);
+}
+
+function lvlFX() {
+  const f = document.createElement('div');
+  f.className = 'lvlflash';
+  document.body.appendChild(f);
+  setTimeout(() => f.remove(), 560);
+}
+
+function hud() {
+  document.getElementById('sc').textContent = S.score.toLocaleString();
+
+  const cm = document.getElementById('cm');
+  const c  = Math.max(1, S.combo);
+  const wasText = cm.textContent;
+  cm.textContent = `×${c}`;
+  cm.style.color = S.combo >= 10 ? '#ff3333'
+                 : S.combo >= 6  ? '#ff8800'
+                 : S.combo >= 3  ? '#ff9922'
+                 : '#444';
+  if (cm.textContent !== wasText && S.combo >= 2) {
+    cm.classList.remove('cbang');
+    void cm.offsetWidth;
+    cm.classList.add('cbang');
+  }
+
+  document.getElementById('lv').textContent = S.level;
+  document.getElementById('lbar').style.width = `${(S.hits % 10) * 10}%`;
+  document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('dead', i >= S.lives));
+}
+
+function start() {
+  document.getElementById('ss').style.display = 'none';
+  document.getElementById('gs').style.display = 'none';
+
+  if (raf) cancelAnimationFrame(raf);
+
+  S = mkState();
+  S.on = true;
+  lastSpawn = 0;
+
+  els.forEach(el => {
+    el.className = 'tile';
+    el.querySelector('.tf').style.cssText = '';
+  });
+
+  hud();
+  raf = requestAnimationFrame(frame);
+}
+
+function end() {
+  S.on = false;
+  cancelAnimationFrame(raf);
+  for (let i = 0; i < N; i++) if (S.tiles[i].active) deactivate(i);
+  if (S.score > hi) { hi = S.score; localStorage.setItem('rfx_hi', hi); }
+
+  setTimeout(() => {
+    document.getElementById('fs').textContent  = S.score.toLocaleString();
+    document.getElementById('bst').textContent = hi.toLocaleString();
+    document.getElementById('fc').textContent  = `×${S.maxCombo}`;
+    document.getElementById('fll').textContent = S.level;
+    document.getElementById('gs').style.display = 'flex';
+  }, 420);
+}
+
+/* ─── Init ─── */
+buildGrid();
+makeDots();
+S = mkState();
+hud();
+document.getElementById('sb').onclick = start;
+document.getElementById('rb').onclick = start;
+
+/* ─── Service worker ─── */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+</script>
+</body>
+</html>
