@@ -4,17 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Reflex Grid</title>
-
-<!-- PWA -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#08080f">
-
-<!-- iOS PWA -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Reflex Grid">
 <link rel="apple-touch-icon" href="icon.svg">
-
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -33,9 +28,8 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100svh;
-  /* respect iPhone notch / home indicator */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+           env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 
 #app {
@@ -43,29 +37,36 @@ body {
   padding: 20px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 /* ─── HUD ─── */
-.hud {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-}
-.hb { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.hud { display: flex; justify-content: space-between; align-items: flex-end; }
+.hb  { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .lbl { font-size: 9px; letter-spacing: 3px; color: #2e2e44; text-transform: uppercase; }
 .val { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 #sc  { color: #a066ee; }
 #cm  { font-size: 22px; font-weight: 800; color: #555; transition: color 0.15s; }
-
-.dots { display: flex; gap: 6px; align-items: center; }
-.dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #a066ee;
-  box-shadow: 0 0 7px #a066ee99;
-  transition: background 0.2s, box-shadow 0.2s;
+#cm.shielded { text-shadow: 0 0 10px #66aaff99; color: inherit; }
+@keyframes shieldBreak {
+  0%   { transform: scale(1.4); color: #66aaff; }
+  100% { transform: scale(1); }
 }
-.dot.dead { background: #18182a; box-shadow: none; }
+#cm.shield-break { animation: shieldBreak 0.35s ease-out; }
+
+/* Lives dots — base (purple) + extra (gold) */
+.dots { display: flex; gap: 5px; align-items: center; }
+.dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #a066ee;
+  box-shadow: 0 0 6px #a066ee99;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+.dot.dot-extra         { background: #ffc940; box-shadow: 0 0 6px #ffc94099; }
+.dot.dead              { background: #18182a; box-shadow: none; }
+.dot.dead.dot-extra    { background: #18182a; box-shadow: none; }
+@keyframes lifeUp      { 0%,100%{transform:scale(1)} 50%{transform:scale(1.5)} }
+.dots.life-up          { animation: lifeUp 0.5s ease-out; }
 
 /* ─── Level bar ─── */
 .lrow { display: flex; align-items: center; gap: 8px; }
@@ -74,17 +75,27 @@ body {
 .lfill {
   height: 100%;
   background: linear-gradient(90deg, #6633bb, #a066ee);
-  border-radius: 2px;
-  width: 0%;
-  transition: width 0.12s;
+  border-radius: 2px; width: 0%; transition: width 0.12s;
 }
 .lnum { font-size: 11px; color: #a066ee; font-weight: 700; width: 18px; text-align: right; }
+
+/* ─── Slow indicator bar ─── */
+#fx-row {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  height: 14px;
+}
+#slow-label { font-size: 9px; letter-spacing: 2px; color: #44ccff; width: 40px; text-transform: uppercase; }
+#slow-track { flex: 1; height: 2px; background: #14142a; border-radius: 2px; overflow: hidden; }
+#slow-bar   { height: 100%; background: #44ccff; border-radius: 2px; width: 100%; }
 
 /* ─── Grid ─── */
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
+  transition: grid-template-columns 0.1s;
 }
 
 .tile {
@@ -100,98 +111,137 @@ body {
 }
 .tile:active { transform: scale(0.86); }
 
+/* tile fill */
 .tf {
-  position: absolute;
-  inset: 0;
+  position: absolute; inset: 0;
   border-radius: 13px;
   opacity: 0;
   transition: opacity 0.14s;
 }
 .tile.on .tf { opacity: 1; }
 
-@keyframes hflash {
-  0%   { opacity: 0.85; }
-  100% { opacity: 0; }
-}
-.tile.hit::after {
-  content: '';
+/* tile icon (★ ✕ ❄) */
+.ti {
   position: absolute; inset: 0;
-  border-radius: 13px;
-  background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+  opacity: 0;
   pointer-events: none;
+  z-index: 1;
+  transition: opacity 0.1s;
+  filter: drop-shadow(0 1px 4px #0006);
+}
+
+/* hit flash */
+@keyframes hflash { 0%{opacity:.85} 100%{opacity:0} }
+.tile.hit::after {
+  content:''; position:absolute; inset:0; border-radius:13px;
+  background:#fff; pointer-events:none;
   animation: hflash 0.22s ease-out forwards;
 }
 
+/* miss red pulse */
 @keyframes mflash {
-  0%   { background: #2a0808; border-color: #440000; }
-  100% { background: #0c0c1a; border-color: #16162a; }
+  0%   { background:#2a0808; border-color:#440000; }
+  100% { background:#0c0c1a; border-color:#16162a; }
 }
 .tile.miss { animation: mflash 0.38s ease-out forwards; }
+
+/* bomb tapped flash */
+@keyframes bflash {
+  0%   { background:#440000; border-color:#880000; }
+  100% { background:#0c0c1a; border-color:#16162a; }
+}
+.tile.bomb-hit { animation: bflash 0.4s ease-out forwards; }
+
+/* new tile entrance (grid expansion) */
+@keyframes tileEnter {
+  0%   { opacity:0; transform:scale(0.3); }
+  70%  { opacity:1; transform:scale(1.06); }
+  100% { transform:scale(1); }
+}
+.tile-enter { animation: tileEnter 0.45s cubic-bezier(0.175,0.885,0.32,1.275) both; }
 
 /* ─── Overlays ─── */
 .ov {
   position: fixed; inset: 0;
-  background: rgba(8, 8, 15, 0.97);
+  background: rgba(8,8,15,0.97);
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  gap: 14px; z-index: 99;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  gap: 12px; z-index: 99;
+  padding: env(safe-area-inset-top,0px) 24px env(safe-area-inset-bottom,0px);
 }
 
-.ot { font-size: 44px; font-weight: 900; letter-spacing: -1.5px; }
+.ot   { font-size: 44px; font-weight: 900; letter-spacing: -1.5px; }
 .ot b { color: #a066ee; }
+.os   { font-size: 12px; color: #383850; letter-spacing: 1px; text-align: center; line-height: 2; text-transform: uppercase; }
 
-.os {
-  font-size: 12px; color: #383850;
-  letter-spacing: 1px; text-align: center;
-  line-height: 2; text-transform: uppercase;
-}
+/* tile type legend on start screen */
+.legend { display: flex; gap: 18px; margin: 2px 0; }
+.leg    { font-size: 11px; color: #444; display: flex; align-items: center; gap: 5px; letter-spacing: 0.5px; }
+.leg-icon { font-size: 15px; }
+.bonus-c  { color: #ffc940; }
+.bomb-c   { color: #ff5555; }
+.slow-c   { color: #44ccff; }
 
-.sbk { display: flex; flex-direction: column; gap: 5px; align-items: center; margin: 4px 0; }
+/* shield hint */
+.hint { font-size: 10px; color: #2e2e44; letter-spacing: 1px; text-align: center; }
+.hint b { color: #66aaff; }
+
+.sbk { display: flex; flex-direction: column; gap: 5px; align-items: center; margin: 2px 0; }
 .sr  { font-size: 12px; color: #383850; letter-spacing: 1px; text-transform: uppercase; }
-.sr span { color: #777; }
+.sr span { color: #888; }
 
 .btn {
-  margin-top: 8px; padding: 13px 48px;
+  margin-top: 6px; padding: 13px 48px;
   background: #a066ee; color: #08080f;
   border: none; border-radius: 100px;
   font-size: 14px; font-weight: 800;
-  cursor: pointer; letter-spacing: 2px;
-  text-transform: uppercase;
+  cursor: pointer; letter-spacing: 2px; text-transform: uppercase;
   transition: transform 0.1s, background 0.1s;
 }
 .btn:hover  { transform: scale(1.05); background: #b87fff; }
 .btn:active { transform: scale(0.96); }
 
+/* ─── Score pop ─── */
 @keyframes pop {
-  0%   { opacity: 1; transform: translateY(0) scale(1); }
-  100% { opacity: 0; transform: translateY(-44px) scale(0.8); }
+  0%   { opacity:1; transform:translateY(0) scale(1); }
+  100% { opacity:0; transform:translateY(-42px) scale(0.8); }
 }
 .pop {
-  position: fixed;
-  font-size: 17px; font-weight: 800;
+  position: fixed; font-size: 17px; font-weight: 800;
   pointer-events: none; z-index: 200;
   animation: pop 0.65s ease-out forwards;
   text-shadow: 0 1px 8px #0008;
 }
 
-@keyframes lvl {
-  0%   { opacity: 0.25; }
-  100% { opacity: 0; }
-}
+/* ─── Level-up flash ─── */
+@keyframes lvl { 0%{opacity:.25} 100%{opacity:0} }
 .lvlflash {
-  position: fixed; inset: 0;
-  background: #a066ee;
-  pointer-events: none; z-index: 198;
+  position:fixed; inset:0; background:#a066ee;
+  pointer-events:none; z-index:198;
   animation: lvl 0.55s ease-out forwards;
 }
 
-@keyframes cbang {
-  0%   { transform: scale(1.6); }
-  100% { transform: scale(1); }
+/* ─── Slow screen tint ─── */
+@keyframes slowFlash { 0%{opacity:.15} 100%{opacity:0} }
+.slow-overlay {
+  position:fixed; inset:0; background:#44ccff;
+  pointer-events:none; z-index:197;
+  animation: slowFlash 0.4s ease-out forwards;
 }
+
+/* ─── Combo bang ─── */
+@keyframes cbang { 0%{transform:scale(1.6)} 100%{transform:scale(1)} }
 .cbang { animation: cbang 0.18s ease-out; }
+
+/* ─── Grid expand pulse ─── */
+@keyframes gridPulse { 0%{opacity:.18} 100%{opacity:0} }
+.grid-flash {
+  position:fixed; inset:0; background:#a066ee;
+  pointer-events:none; z-index:196;
+  animation: gridPulse 0.6s ease-out forwards;
+}
 </style>
 </head>
 <body>
@@ -215,7 +265,13 @@ body {
   <div class="lrow">
     <div class="llbl">Level</div>
     <div class="ltrack"><div class="lfill" id="lbar"></div></div>
-    <div class="lnum"  id="lv">1</div>
+    <div class="lnum" id="lv">1</div>
+  </div>
+
+  <!-- slow power-up countdown -->
+  <div id="fx-row">
+    <div id="slow-label">❄ Slow</div>
+    <div id="slow-track"><div id="slow-bar"></div></div>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -224,10 +280,13 @@ body {
 <!-- Start screen -->
 <div class="ov" id="ss">
   <div class="ot">REFLEX <b>GRID</b></div>
-  <div class="os">
-    Tap tiles before they expire<br>
-    Build combos · level up · survive
+  <div class="os">Tap tiles before they expire<br>Build combos · level up · survive</div>
+  <div class="legend">
+    <div class="leg"><span class="leg-icon bonus-c">★</span><span class="bonus-c">Bonus</span> +life</div>
+    <div class="leg"><span class="leg-icon bomb-c">✕</span><span class="bomb-c">Bomb</span> avoid</div>
+    <div class="leg"><span class="leg-icon slow-c">❄</span><span class="slow-c">Freeze</span> tiles</div>
   </div>
+  <div class="hint">Combo <b>×5+</b> activates combo shield</div>
   <button class="btn" id="sb">Play</button>
 </div>
 
@@ -246,113 +305,300 @@ body {
 <script>
 'use strict';
 
-const N = 16, ML = 3;
+// ─── Config ─────────────────────────────────────────────────
+const BASE_LIVES   = 3;
+const MAX_LIVES    = 5;   // extra lives earned from bonus tiles + recovery
+const LIFE_EVERY   = 30;  // hit streak needed for free life recovery
+const SHIELD_AT    = 5;   // combo threshold for shield
+const SLOW_MS      = 3000;
+const SLOW_SPEED   = 0.35;
 
-function prm(lv) {
+// Grid size by level: 2×2 → 3×3 → 4×4
+function gridColsForLevel(lv) {
+  if (lv < 4) return 2;
+  if (lv < 7) return 3;
+  return 4;
+}
+
+// Base difficulty params (modulated by diffMod below)
+function baseParams(effLv, gridN) {
   return {
-    max:  Math.min(1 + Math.floor(lv * 0.65), 8),
-    life: Math.max(580, 2400 - lv * 145),
-    gap:  Math.max(260, 1200 - lv * 72),
+    max:  Math.min(1 + Math.floor(effLv * 0.65), Math.floor(gridN * 0.55)),
+    life: Math.max(580, 2400 - effLv * 145),
+    gap:  Math.max(260, 1200 - effLv * 72),
   };
 }
 
+// Tile type probabilities by level
+function pickType(lv) {
+  const r = Math.random();
+  if (lv >= 5) {
+    if (r < 0.08) return 'slow';
+    if (r < 0.23) return 'bomb';
+    if (r < 0.38) return 'bonus';
+  } else if (lv >= 3) {
+    if (r < 0.05) return 'slow';
+    if (r < 0.17) return 'bomb';
+    if (r < 0.30) return 'bonus';
+  } else if (lv >= 2) {
+    if (r < 0.14) return 'bonus';
+    if (r < 0.18) return 'bomb';
+  } else {
+    if (r < 0.12) return 'bonus';
+  }
+  return 'normal';
+}
+
+// ─── State ──────────────────────────────────────────────────
 let S, els, raf, lastSpawn;
 let hi = +(localStorage.getItem('rfx_hi') || 0);
 
 function mkState() {
   return {
-    score: 0, combo: 0, maxCombo: 0, level: 1, hits: 0, lives: ML, on: false,
-    tiles: Array.from({length: N}, () => ({ active: false, t0: 0, life: 0 }))
+    score: 0, combo: 0, maxCombo: 0, level: 1,
+    hits: 0, lives: BASE_LIVES, on: false,
+    gridCols: 2, gridN: 4,
+    diffMod: 1.0,
+    hitHistory: [],  // 0=miss 1=hit, last 10
+    slowUntil: 0,
+    lastFrame: 0,
+    tiles: Array.from({length: 4}, mkTile)
   };
 }
 
-function buildGrid() {
+function mkTile() {
+  return { active: false, age: 0, life: 0, type: 'normal' };
+}
+
+// ─── DOM ────────────────────────────────────────────────────
+function buildGrid(cols) {
   const g = document.getElementById('grid');
   g.innerHTML = '';
+  g.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   els = [];
-  for (let i = 0; i < N; i++) {
-    const d = document.createElement('div');
-    d.className = 'tile';
-    d.innerHTML = '<div class="tf"></div>';
-    d.addEventListener('pointerdown', e => { e.preventDefault(); tap(i); });
-    g.appendChild(d);
-    els.push(d);
-  }
+  const n = cols * cols;
+  for (let i = 0; i < n; i++) appendTileEl(i, g);
+}
+
+function appendTileEl(i, g) {
+  const d = document.createElement('div');
+  d.className = 'tile';
+  d.innerHTML = '<div class="tf"></div><div class="ti"></div>';
+  d.addEventListener('pointerdown', e => { e.preventDefault(); tap(i); });
+  (g || document.getElementById('grid')).appendChild(d);
+  if (els) els.push(d); else els = [d];
+  return d;
 }
 
 function makeDots() {
   const c = document.getElementById('dots');
   c.innerHTML = '';
-  for (let i = 0; i < ML; i++) {
+  for (let i = 0; i < MAX_LIVES; i++) {
     const d = document.createElement('div');
-    d.className = 'dot';
+    d.className = 'dot' + (i >= BASE_LIVES ? ' dot-extra dead' : '');
     c.appendChild(d);
   }
 }
 
+// ─── Tile logic ──────────────────────────────────────────────
 function activate(i) {
-  const p = prm(S.level);
-  S.tiles[i] = { active: true, t0: performance.now(), life: p.life };
-  els[i].classList.add('on');
+  const p = baseParams(S.level * S.diffMod, S.gridN);
+  const type = pickType(S.level);
+  S.tiles[i] = { active: true, age: 0, life: p.life, type };
+  const el = els[i];
+  el.classList.add('on');
+  const ti = el.querySelector('.ti');
+  ti.textContent = type === 'bonus' ? '★' : type === 'bomb' ? '✕' : type === 'slow' ? '❄' : '';
+  ti.style.opacity = type !== 'normal' ? '0.9' : '0';
 }
 
 function deactivate(i) {
+  if (i >= els.length) return;
   S.tiles[i].active = false;
-  els[i].classList.remove('on');
-  els[i].querySelector('.tf').style.cssText = '';
+  const el = els[i];
+  el.classList.remove('on');
+  el.querySelector('.tf').style.cssText = '';
+  el.querySelector('.ti').style.opacity = '0';
 }
 
+// Combo break — with shield at SHIELD_AT+
+function breakCombo() {
+  if (S.combo >= SHIELD_AT) {
+    S.combo = Math.max(1, Math.floor(S.combo / 2));
+    shieldBreakFX();
+  } else {
+    S.combo = 0;
+  }
+}
+
+// ─── Tap ────────────────────────────────────────────────────
 function tap(i) {
-  if (!S.on || !S.tiles[i].active) return;
+  if (!S.on || i >= S.gridN || !S.tiles[i].active) return;
+  const type = S.tiles[i].type;
   deactivate(i);
+
+  // Bomb: penalty only
+  if (type === 'bomb') {
+    S.combo = 0;
+    S.lives = Math.max(0, S.lives - 1);
+    bombFX(i);
+    hud();
+    if (S.lives === 0) end();
+    return;
+  }
+
+  // Hit!
   S.combo++;
   if (S.combo > S.maxCombo) S.maxCombo = S.combo;
   S.hits++;
-  const pts = 100 * S.combo;
+
+  let pts = 100 * S.combo;
+
+  if (type === 'bonus') {
+    pts += 300;
+    if (S.lives < MAX_LIVES) { S.lives++; lifeRecoverFX(); }
+  }
+
+  if (type === 'slow') {
+    S.slowUntil = performance.now() + SLOW_MS;
+    slowActiveFX();
+  }
+
+  // Free life every LIFE_EVERY hits
+  if (S.hits % LIFE_EVERY === 0 && S.lives < MAX_LIVES) {
+    S.lives++;
+    lifeRecoverFX();
+  }
+
   S.score += pts;
+
+  // Adaptive difficulty
+  recordOutcome(1);
+
+  // Level up check
   const nl = Math.floor(S.hits / 10) + 1;
-  if (nl > S.level) { S.level = nl; lvlFX(); }
-  hitFX(i, pts);
+  if (nl > S.level) {
+    S.level = nl;
+    const newCols = gridColsForLevel(S.level);
+    if (newCols > S.gridCols) expandGrid(newCols);
+    lvlFX();
+  }
+
+  hitFX(i, pts, type);
   hud();
 }
 
+// ─── Expire ─────────────────────────────────────────────────
 function expire(i) {
+  const type = S.tiles[i].type;
   deactivate(i);
-  S.combo = 0;
+  if (type === 'bomb') return;  // safe to miss a bomb
+
+  breakCombo();
   S.lives = Math.max(0, S.lives - 1);
   hud();
+
+  recordOutcome(0);
+
   if (S.lives === 0) { end(); return; }
   els[i].classList.add('miss');
   setTimeout(() => els[i].classList.remove('miss'), 380);
 }
 
-function col(t) {
-  const h = 270 - t * 242;
-  const s = 62 + t * 28;
-  const l = 56 + t * 4;
-  return `hsl(${h|0},${s|0}%,${l|0}%)`;
+// ─── Adaptive difficulty ─────────────────────────────────────
+function recordOutcome(v) {
+  S.hitHistory.push(v);
+  if (S.hitHistory.length > 10) S.hitHistory.shift();
+  if (S.hitHistory.length < 5) return;
+
+  const rate = S.hitHistory.slice(-5).reduce((a, b) => a + b, 0) / 5;
+  if      (rate >= 0.9) S.diffMod = Math.min(S.diffMod + 0.12, 1.8);
+  else if (rate >= 0.7) S.diffMod = Math.min(S.diffMod + 0.05, 1.8);
+  else if (rate <  0.4) S.diffMod = Math.max(S.diffMod - 0.12, 0.5);
+  else if (rate <  0.6) S.diffMod = Math.max(S.diffMod - 0.05, 0.5);
 }
 
+// ─── Grid expansion ─────────────────────────────────────────
+function expandGrid(newCols) {
+  const prevN = S.gridN;
+  S.gridCols = newCols;
+  S.gridN = newCols * newCols;
+
+  for (let i = prevN; i < S.gridN; i++) S.tiles.push(mkTile());
+
+  const g = document.getElementById('grid');
+  g.style.gridTemplateColumns = `repeat(${newCols}, 1fr)`;
+
+  for (let i = prevN; i < S.gridN; i++) {
+    const d = appendTileEl(i, g);
+    d.classList.add('tile-enter');
+    setTimeout(() => d.classList.remove('tile-enter'), 500);
+  }
+
+  gridExpandFX();
+}
+
+// ─── Tile colour ─────────────────────────────────────────────
+function tileStyle(type, prog, now) {
+  if (type === 'bonus') {
+    const l = 50 + Math.sin(now * 0.005) * 5;
+    return { bg: `hsl(45,88%,${l|0}%)`, sh: `hsl(45,90%,62%)` };
+  }
+  if (type === 'bomb') {
+    const pulse = 0.5 + 0.5 * Math.sin(now * 0.009);
+    const l = 30 + (pulse * 14) | 0;
+    return { bg: `hsl(0,85%,${l}%)`, sh: `hsl(0,90%,45%)` };
+  }
+  if (type === 'slow') {
+    const l = 50 + Math.sin(now * 0.005) * 5;
+    return { bg: `hsl(188,72%,${l|0}%)`, sh: `hsl(188,80%,62%)` };
+  }
+  // normal: purple → orange
+  const h = 270 - prog * 242;
+  const s = 62 + prog * 28;
+  const l = 56 + prog * 4;
+  return { bg: `hsl(${h|0},${s|0}%,${l|0}%)`, sh: `hsl(${h|0},80%,62%)` };
+}
+
+// ─── Animation loop ──────────────────────────────────────────
 function frame(now) {
   if (!S.on) return;
-  const p = prm(S.level);
+
+  const dt = S.lastFrame ? now - S.lastFrame : 16;
+  S.lastFrame = now;
+  const slowActive = S.slowUntil > now;
+  const speed = slowActive ? SLOW_SPEED : 1.0;
+  const p = baseParams(S.level * S.diffMod, S.gridN);
   let active = 0;
 
-  for (let i = 0; i < N; i++) {
+  // Slow bar
+  const fxRow = document.getElementById('fx-row');
+  if (slowActive) {
+    fxRow.style.display = 'flex';
+    document.getElementById('slow-bar').style.width =
+      `${((S.slowUntil - now) / SLOW_MS) * 100}%`;
+  } else {
+    fxRow.style.display = 'none';
+  }
+
+  // Update tiles
+  for (let i = 0; i < S.gridN; i++) {
     const tile = S.tiles[i];
     if (!tile.active) continue;
     active++;
-    const prog = (now - tile.t0) / tile.life;
+    tile.age += dt * speed;
+    const prog = tile.age / tile.life;
     if (prog >= 1) { expire(i); active--; continue; }
-    const c = col(Math.min(prog, 0.99));
+    const st = tileStyle(tile.type, Math.min(prog, 0.99), now);
     const tf = els[i].querySelector('.tf');
-    tf.style.background = c;
-    tf.style.boxShadow = `inset 0 0 22px ${c}44, 0 0 8px ${c}33`;
+    tf.style.background = st.bg;
+    tf.style.boxShadow  = `inset 0 0 22px ${st.sh}44, 0 0 8px ${st.sh}33`;
   }
 
+  // Spawn
   if (active < p.max && now - lastSpawn > p.gap) {
     const pool = [];
-    for (let i = 0; i < N; i++) if (!S.tiles[i].active) pool.push(i);
+    for (let i = 0; i < S.gridN; i++) if (!S.tiles[i].active) pool.push(i);
     if (pool.length) {
       activate(pool[Math.random() * pool.length | 0]);
       lastSpawn = now;
@@ -362,24 +608,31 @@ function frame(now) {
   raf = requestAnimationFrame(frame);
 }
 
-function hitFX(i, pts) {
+// ─── Visual FX ──────────────────────────────────────────────
+function hitFX(i, pts, type) {
   const el = els[i];
-  el.classList.remove('hit');
-  void el.offsetWidth;
-  el.classList.add('hit');
+  el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit');
   setTimeout(() => el.classList.remove('hit'), 250);
 
   const r = el.getBoundingClientRect();
   const p = document.createElement('div');
   p.className = 'pop';
   p.textContent = `+${pts}`;
-  p.style.left = `${r.left + r.width / 2 - 18}px`;
-  p.style.top  = `${r.top - 2}px`;
-  p.style.color = S.combo >= 8 ? '#ff5555'
+  p.style.left  = `${r.left + r.width / 2 - 18}px`;
+  p.style.top   = `${r.top - 2}px`;
+  p.style.color = type === 'bonus' ? '#ffc940'
+                : type === 'slow'  ? '#44ccff'
+                : S.combo >= 8 ? '#ff5555'
                 : S.combo >= 4 ? '#ff9922'
                 : '#a066ee';
   document.body.appendChild(p);
   setTimeout(() => p.remove(), 700);
+}
+
+function bombFX(i) {
+  const el = els[i];
+  el.classList.add('bomb-hit');
+  setTimeout(() => el.classList.remove('bomb-hit'), 400);
 }
 
 function lvlFX() {
@@ -389,43 +642,70 @@ function lvlFX() {
   setTimeout(() => f.remove(), 560);
 }
 
+function gridExpandFX() {
+  const f = document.createElement('div');
+  f.className = 'grid-flash';
+  document.body.appendChild(f);
+  setTimeout(() => f.remove(), 620);
+}
+
+function shieldBreakFX() {
+  const cm = document.getElementById('cm');
+  cm.classList.remove('shield-break'); void cm.offsetWidth;
+  cm.classList.add('shield-break');
+  setTimeout(() => cm.classList.remove('shield-break'), 400);
+}
+
+function lifeRecoverFX() {
+  const d = document.getElementById('dots');
+  d.classList.remove('life-up'); void d.offsetWidth;
+  d.classList.add('life-up');
+  setTimeout(() => d.classList.remove('life-up'), 550);
+}
+
+function slowActiveFX() {
+  const o = document.createElement('div');
+  o.className = 'slow-overlay';
+  document.body.appendChild(o);
+  setTimeout(() => o.remove(), 420);
+}
+
+// ─── HUD ────────────────────────────────────────────────────
 function hud() {
   document.getElementById('sc').textContent = S.score.toLocaleString();
 
   const cm = document.getElementById('cm');
-  const c  = Math.max(1, S.combo);
   const wasText = cm.textContent;
-  cm.textContent = `×${c}`;
+  cm.textContent = `×${Math.max(1, S.combo)}`;
   cm.style.color = S.combo >= 10 ? '#ff3333'
                  : S.combo >= 6  ? '#ff8800'
                  : S.combo >= 3  ? '#ff9922'
                  : '#444';
+  cm.classList.toggle('shielded', S.combo >= SHIELD_AT);
+
   if (cm.textContent !== wasText && S.combo >= 2) {
-    cm.classList.remove('cbang');
-    void cm.offsetWidth;
-    cm.classList.add('cbang');
+    cm.classList.remove('cbang'); void cm.offsetWidth; cm.classList.add('cbang');
   }
 
   document.getElementById('lv').textContent = S.level;
   document.getElementById('lbar').style.width = `${(S.hits % 10) * 10}%`;
-  document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('dead', i >= S.lives));
+
+  document.querySelectorAll('.dot').forEach((d, i) => {
+    d.classList.toggle('dead', i >= S.lives);
+  });
 }
 
+// ─── Game flow ───────────────────────────────────────────────
 function start() {
   document.getElementById('ss').style.display = 'none';
   document.getElementById('gs').style.display = 'none';
-
   if (raf) cancelAnimationFrame(raf);
 
   S = mkState();
   S.on = true;
   lastSpawn = 0;
 
-  els.forEach(el => {
-    el.className = 'tile';
-    el.querySelector('.tf').style.cssText = '';
-  });
-
+  buildGrid(2);
   hud();
   raf = requestAnimationFrame(frame);
 }
@@ -433,7 +713,7 @@ function start() {
 function end() {
   S.on = false;
   cancelAnimationFrame(raf);
-  for (let i = 0; i < N; i++) if (S.tiles[i].active) deactivate(i);
+  for (let i = 0; i < S.gridN; i++) if (S.tiles[i].active) deactivate(i);
   if (S.score > hi) { hi = S.score; localStorage.setItem('rfx_hi', hi); }
 
   setTimeout(() => {
@@ -445,18 +725,15 @@ function end() {
   }, 420);
 }
 
-/* ─── Init ─── */
-buildGrid();
+// ─── Init ────────────────────────────────────────────────────
 makeDots();
 S = mkState();
+buildGrid(2);
 hud();
 document.getElementById('sb').onclick = start;
 document.getElementById('rb').onclick = start;
 
-/* ─── Service worker ─── */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
